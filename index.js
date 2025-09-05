@@ -84,9 +84,10 @@ async function zipWorkspace(rootDir) {
   });
 }
 
-async function getSignedUploadUrl() {
+async function getSignedUploadUrl(directory = "/") {
   const endpoint = `${url}/api/client/servers/${serverId}/files/upload`;
   const { data } = await axios.get(endpoint, {
+    params: { directory },
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
@@ -95,10 +96,9 @@ async function getSignedUploadUrl() {
   return data?.attributes?.url || data?.url;
 }
 
-async function uploadFileToSignedUrl(signedUrl, filePath, filename, directory = "/") {
+async function uploadFileToSignedUrl(signedUrl, filePath, filename) {
   const form = new FormData();
   form.append("files", fs.createReadStream(filePath), filename);
-  form.append("directory", directory);
 
   await axios.post(signedUrl, form, {
     maxContentLength: Infinity,
@@ -173,7 +173,7 @@ async function cleanServerRoot(root = "/") {
 
   const dirs = items.filter(i => i.isDir && i.name).map(i => i.name);
   for (const dirName of dirs) {
-    const childRoot = path.posix.join(root === "/" ? "" : root, dirName);
+    const childRoot = path.posix.join(root === "/" ? "/" : root, dirName);
     await cleanServerRoot(childRoot);
     // delete the (now empty) directory; some panels require trailing slash to denote directories
     await deleteServerFiles([`${dirName}/`], root);
@@ -421,10 +421,10 @@ async function sendCommands(runBlock) {
     const { outPath, archiveName } = await zipWorkspace(sourceRoot);
 
     core.info("Requesting signed upload URL from panel...");
-    const signedUrl = await getSignedUploadUrl();
+    const signedUrl = await getSignedUploadUrl(destinationDir);
 
     core.info(`Uploading ${archiveName} to ${destinationDir} ...`);
-    await uploadFileToSignedUrl(signedUrl, outPath, archiveName, destinationDir);
+    await uploadFileToSignedUrl(signedUrl, outPath, archiveName);
 
     core.info("Decompressing archive on the server...");
     await decompressOnServer(archiveName, destinationDir);

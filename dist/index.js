@@ -78621,6 +78621,16 @@ function normaliseUrl(u) {
   return u.replace(/\/+$/, "");
 }
 
+function originFromUrl(u) {
+  try {
+    return new URL(u).origin;
+  } catch {
+    // Fallback: strip path if given
+    const m = String(u).match(/^(https?:\/\/[^/]+)/i);
+    return m ? m[1] : u;
+  }
+}
+
 const url = normaliseUrl(core.getInput("url", { required: true }));
 const apiKey = core.getInput("api_key", { required: true });
 const serverId = core.getInput("server_id", { required: true });
@@ -78767,7 +78777,15 @@ async function waitForStatus(desired, timeoutMs = 60000) {
 
   const { token, socketUrl } = await getWebsocketDetails();
   core.info(`Connecting to websocket to wait for state: ${desired}`);
-  const ws = new WebSocket(socketUrl);
+  const ws = new WebSocket(socketUrl, {
+    perMessageDeflate: false,
+    headers: {
+      // Some proxies (e.g., Cloudflare / Nginx) require a browser-like Origin for WS upgrade
+      Origin: originFromUrl(url),
+      "User-Agent": "ptero-deploy-action/1 (+github-actions)",
+      Accept: "*/*",
+    },
+  });
 
   let done = false;
   let timeout;
@@ -78834,14 +78852,31 @@ async function waitForStatus(desired, timeoutMs = 60000) {
 
     ws.on("error", (err) => {
       if (!done) {
-        done = true;
+        // If blocked by proxy (e.g., 403 on upgrade), fall back to REST polling
+        const statusCode = err && (err.statusCode || err.code);
+        core.info(`Websocket error${statusCode ? " (" + statusCode + ")" : ""}: ${err.message || err}`);
         cleanup();
-        reject(err);
+        (async () => {
+          try {
+            const started = Date.now();
+            while (Date.now() - started < timeoutMs) {
+              const st = await getCurrentStatus();
+              if (st && st.toLowerCase() === desired.toLowerCase()) {
+                return resolve();
+              }
+              await new Promise(r => setTimeout(r, 1000));
+            }
+            reject(new Error(`Timed out waiting for state "${desired}" (fallback polling after websocket error)`));
+          } catch (e) {
+            reject(e);
+          }
+        })();
       }
     });
 
     ws.on("close", () => {
       if (!done) {
+        core.info("Websocket closed, falling back to REST polling...");
         // Fallback to periodic REST polling if ws closes unexpectedly
         (async () => {
           try {

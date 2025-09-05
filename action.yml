@@ -18,6 +18,7 @@ inputs:
   run:
     description: "Newline-separated commands to run in the server console"
     required: false
+    default: ""
 
 runs:
   using: "node20"

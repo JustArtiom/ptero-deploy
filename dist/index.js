@@ -78630,6 +78630,20 @@ function originFromUrl(u) {
   }
 }
 
+function normalisePanelPath(p) {
+  if (!p || typeof p !== "string") return "/";
+  // convert backslashes to forward slashes and trim whitespace
+  let v = p.replace(/\\+/g, "/").trim();
+  // remove leading './'
+  v = v.replace(/^\.\//, "");
+  // ensure leading '/'
+  if (v === "" || v === "/") return "/";
+  if (!v.startsWith("/")) v = "/" + v;
+  // drop trailing slashes (except root)
+  v = v.replace(/\/+$/, "");
+  return v || "/";
+}
+
 const url = normaliseUrl(core.getInput("url", { required: true }));
 const apiKey = core.getInput("api_key", { required: true });
 const serverId = core.getInput("server_id", { required: true });
@@ -78639,8 +78653,15 @@ const clean = cleanInput === "true" || cleanInput === "1" || cleanInput === "yes
 
 core.setSecret(apiKey);
 
-const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-const destinationDir = "/";
+const workspaceEnv = process.env.GITHUB_WORKSPACE || process.cwd();
+const basePathInput = core.getInput("base_path") || ""; // relative to workspace
+const destinationPathInput = core.getInput("destination_path") || "/";
+
+const sourceRoot = path.resolve(workspaceEnv, basePathInput || ".");
+if (!fs.existsSync(sourceRoot)) {
+  throw new Error(`Base path does not exist: ${sourceRoot}`);
+}
+const destinationDir = normalisePanelPath(destinationPathInput);
 
 async function zipWorkspace(rootDir) {
   return new Promise((resolve, reject) => {
@@ -78734,10 +78755,12 @@ async function listDirectory(root = "/") {
   });
   const items = (data?.data || data || []).map((entry) => {
     const attr = entry?.attributes || entry;
+    const isFile = attr?.is_file === true || attr?.isFile === true;
+    const isDir = attr?.is_directory === true || attr?.is_dir === true || (attr?.isFile === false && attr?.is_file !== true);
     return {
       name: attr?.name,
-      isFile: !!attr?.is_file || attr?.isFile === true,
-      isDir: !!attr?.is_directory || !!attr?.is_dir || attr?.isFile === false,
+      isFile,
+      isDir,
     };
   });
   return items;
@@ -78761,7 +78784,8 @@ async function cleanServerRoot(root = "/") {
   for (const dirName of dirs) {
     const childRoot = path.posix.join(root === "/" ? "" : root, dirName);
     await cleanServerRoot(childRoot);
-    await deleteServerFiles([dirName], root);
+    // delete the (now empty) directory; some panels require trailing slash to denote directories
+    await deleteServerFiles([`${dirName}/`], root);
     core.info(`Deleted directory ${childRoot}`);
   }
 }
@@ -78998,11 +79022,12 @@ async function sendCommands(runBlock) {
     await waitForStatus("offline", 30000);
 
     if (clean) {
-      await cleanServerRoot("/");
+      await cleanServerRoot(destinationDir);
     }
 
-    core.info(`Zipping workspace at: ${workspace}`);
-    const { outPath, archiveName } = await zipWorkspace(workspace);
+    core.info(`Zipping source at: ${sourceRoot}`);
+    core.info(`Destination path on server: ${destinationDir}`);
+    const { outPath, archiveName } = await zipWorkspace(sourceRoot);
 
     core.info("Requesting signed upload URL from panel...");
     const signedUrl = await getSignedUploadUrl();

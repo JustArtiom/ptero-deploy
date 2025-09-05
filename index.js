@@ -340,6 +340,7 @@ async function sendCommands(runBlock) {
 
     await sendPower("start");
     await waitForStatus("running", 60000);
+    await sleep(2000);
 
     if (runInput && runInput.trim()) {
       core.info("Executing post-deploy commands...");

@@ -78650,6 +78650,8 @@ const serverId = core.getInput("server_id", { required: true });
 const runInput = core.getInput("run") || "";
 const cleanInput = (core.getInput("clean") || "false").toString().trim().toLowerCase();
 const clean = cleanInput === "true" || cleanInput === "1" || cleanInput === "yes";
+const restartInput = (core.getInput("restart") || "true").toString().trim().toLowerCase();
+const shouldRestart = restartInput === "true" || restartInput === "1" || restartInput === "yes";
 
 core.setSecret(apiKey);
 
@@ -78662,6 +78664,8 @@ if (!fs.existsSync(sourceRoot)) {
   throw new Error(`Base path does not exist: ${sourceRoot}`);
 }
 const destinationDir = normalisePanelPath(destinationPathInput);
+
+core.info(`Restart during deploy: ${shouldRestart}`);
 
 async function zipWorkspace(rootDir) {
   return new Promise((resolve, reject) => {
@@ -79018,8 +79022,12 @@ async function sendCommands(runBlock) {
 
 (async () => {
   try {
-    await sendPower("kill");
-    await waitForStatus("offline", 30000);
+    if (shouldRestart) {
+      await sendPower("kill");
+      await waitForStatus("offline", 30000);
+    } else {
+      core.info("Restart disabled: skipping stop and offline wait.");
+    }
 
     if (clean) {
       await cleanServerRoot(destinationDir);
@@ -79041,9 +79049,13 @@ async function sendCommands(runBlock) {
     core.info("Cleaning up uploaded archive on the server...");
     await deleteServerFiles([archiveName], destinationDir);
 
-    await sendPower("start");
-    await waitForStatus("running", 60000);
-    await sleep(2000);
+    if (shouldRestart) {
+      await sendPower("start");
+      await waitForStatus("running", 60000);
+      await sleep(2000);
+    } else {
+      core.info("Restart disabled: not starting server (assuming it's already running).");
+    }
 
     if (runInput && runInput.trim()) {
       core.info("Executing post-deploy commands...");

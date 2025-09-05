@@ -23,6 +23,10 @@ inputs:
     description: "The destination path on the server (e.g., ./public)"
     required: false
     default: "/"
+  restart:
+    description: "Whether to restart the server while deploying (true/false)"
+    required: false
+    default: "true"
   clean:
     description: "Whether to clean the server files before deployment (true/false)"
     required: false

@@ -73722,8 +73722,61 @@ async function deleteServerFiles(files, root = "/") {
   );
 }
 
+async function sendPower(state) {
+  const endpoint = `${url}/api/client/servers/${serverId}/power`;
+  core.info(`Sending power action: ${state}`);
+  await axios.post(
+    endpoint,
+    { signal: state },
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+    }
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sendCommands(runBlock) {
+  const endpoint = `${url}/api/client/servers/${serverId}/command`;
+  // Split by newline, trim, drop empties, and strip wrapping quotes
+  const lines = runBlock
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean)
+    .map(l => {
+      const m1 = l.match(/^"(.*)"$/);
+      const m2 = l.match(/^'(.*)'$/);
+      return m1 ? m1[1] : (m2 ? m2[1] : l);
+    });
+
+  for (const cmd of lines) {
+    core.info(`Sending command: ${cmd}`);
+    await axios.post(
+      endpoint,
+      { command: cmd },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+      }
+    );
+    // Small delay to avoid flooding the API/console
+    await new Promise(res => setTimeout(res, 500));
+  }
+  core.info("All commands sent ✅");
+}
+
 (async () => {
   try {
+    await sendPower("kill");
+    await sleep(1000);
+
     core.info(`Zipping workspace at: ${workspace}`);
     const { outPath, archiveName } = await zipWorkspace(workspace);
 
@@ -73738,6 +73791,14 @@ async function deleteServerFiles(files, root = "/") {
 
     core.info("Cleaning up uploaded archive on the server...");
     await deleteServerFiles([archiveName], destinationDir);
+
+    await sendPower("start");
+    await sleep(1000);
+
+    if (runInput && runInput.trim()) {
+      core.info("Executing post-deploy commands...");
+      await sendCommands(runInput);
+    }
 
     core.info("Upload + extract complete ✅");
   } catch (err) {

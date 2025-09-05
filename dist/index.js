@@ -78625,7 +78625,6 @@ function originFromUrl(u) {
   try {
     return new URL(u).origin;
   } catch {
-    // Fallback: strip path if given
     const m = String(u).match(/^(https?:\/\/[^/]+)/i);
     return m ? m[1] : u;
   }
@@ -78635,6 +78634,8 @@ const url = normaliseUrl(core.getInput("url", { required: true }));
 const apiKey = core.getInput("api_key", { required: true });
 const serverId = core.getInput("server_id", { required: true });
 const runInput = core.getInput("run") || "";
+const cleanInput = (core.getInput("clean") || "false").toString().trim().toLowerCase();
+const clean = cleanInput === "true" || cleanInput === "1" || cleanInput === "yes";
 
 core.setSecret(apiKey);
 
@@ -78722,6 +78723,49 @@ async function deleteServerFiles(files, root = "/") {
   );
 }
 
+async function listDirectory(root = "/") {
+  const endpoint = `${url}/api/client/servers/${serverId}/files/list`;
+  const { data } = await axios.get(endpoint, {
+    params: { directory: root },
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "application/json",
+    },
+  });
+  const items = (data?.data || data || []).map((entry) => {
+    const attr = entry?.attributes || entry;
+    return {
+      name: attr?.name,
+      isFile: !!attr?.is_file || attr?.isFile === true,
+      isDir: !!attr?.is_directory || !!attr?.is_dir || attr?.isFile === false,
+    };
+  });
+  return items;
+}
+
+async function cleanServerRoot(root = "/") {
+  core.info(`Cleaning server files at ${root} ...`);
+  const items = await listDirectory(root);
+  if (!items || items.length === 0) {
+    core.info("Nothing to clean.");
+    return;
+  }
+
+  const filesToDelete = items.filter(i => i.isFile && i.name).map(i => i.name);
+  if (filesToDelete.length) {
+    await deleteServerFiles(filesToDelete, root);
+    core.info(`Deleted ${filesToDelete.length} file(s) in ${root}`);
+  }
+
+  const dirs = items.filter(i => i.isDir && i.name).map(i => i.name);
+  for (const dirName of dirs) {
+    const childRoot = path.posix.join(root === "/" ? "" : root, dirName);
+    await cleanServerRoot(childRoot);
+    await deleteServerFiles([dirName], root);
+    core.info(`Deleted directory ${childRoot}`);
+  }
+}
+
 async function getWebsocketDetails() {
   const endpoint = `${url}/api/client/servers/${serverId}/websocket`;
   const { data } = await axios.get(endpoint, {
@@ -78730,7 +78774,6 @@ async function getWebsocketDetails() {
       Accept: "application/json",
     },
   });
-  // Support both {data:{token}, socket} and {attributes:{token, socket}}
   const token =
     data?.data?.token ||
     data?.attributes?.token ||
@@ -78753,7 +78796,6 @@ async function getCurrentStatus() {
       Accept: "application/json",
     },
   });
-  // v1 returns data.attributes.current_state or current_status
   return (
     data?.attributes?.current_state ||
     data?.attributes?.current_status ||
@@ -78764,7 +78806,6 @@ async function getCurrentStatus() {
 }
 
 async function waitForStatus(desired, timeoutMs = 60000) {
-  // First quick check via REST in case we're already there
   try {
     const now = await getCurrentStatus();
     if (now && now.toLowerCase() === desired.toLowerCase()) {
@@ -78772,7 +78813,6 @@ async function waitForStatus(desired, timeoutMs = 60000) {
       return;
     }
   } catch (e) {
-    // ignore and proceed to websocket
   }
 
   const { token, socketUrl } = await getWebsocketDetails();
@@ -78780,7 +78820,6 @@ async function waitForStatus(desired, timeoutMs = 60000) {
   const ws = new WebSocket(socketUrl, {
     perMessageDeflate: false,
     headers: {
-      // Some proxies (e.g., Cloudflare / Nginx) require a browser-like Origin for WS upgrade
       Origin: originFromUrl(url),
       "User-Agent": "ptero-deploy-action/1 (+github-actions)",
       Accept: "*/*",
@@ -78816,8 +78855,6 @@ async function waitForStatus(desired, timeoutMs = 60000) {
         const arg0 = Array.isArray(msg?.args) ? msg.args[0] : undefined;
 
         if (ev === "auth success") {
-          // After auth, status events will arrive on change.
-          // Kick off a quick REST check too in case status is already desired.
           try {
             const current = await getCurrentStatus();
             if (current && current.toLowerCase() === desired.toLowerCase()) {
@@ -78840,19 +78877,15 @@ async function waitForStatus(desired, timeoutMs = 60000) {
           }
         }
 
-        // Token refresh handling (optional)
         if (ev === "token expiring") {
-          // Re-auth with same token (panel usually sends a new token via "token expired" flow)
           ws.send(JSON.stringify({ event: "auth", args: [token] }));
         }
       } catch (e) {
-        // ignore parse errors
       }
     });
 
     ws.on("error", (err) => {
       if (!done) {
-        // If blocked by proxy (e.g., 403 on upgrade), fall back to REST polling
         const statusCode = err && (err.statusCode || err.code);
         core.info(`Websocket error${statusCode ? " (" + statusCode + ")" : ""}: ${err.message || err}`);
         cleanup();
@@ -78877,7 +78910,6 @@ async function waitForStatus(desired, timeoutMs = 60000) {
     ws.on("close", () => {
       if (!done) {
         core.info("Websocket closed, falling back to REST polling...");
-        // Fallback to periodic REST polling if ws closes unexpectedly
         (async () => {
           try {
             const started = Date.now();
@@ -78933,7 +78965,6 @@ function sleep(ms) {
 
 async function sendCommands(runBlock) {
   const endpoint = `${url}/api/client/servers/${serverId}/command`;
-  // Split by newline, trim, drop empties, and strip wrapping quotes
   const lines = runBlock
     .split(/\r?\n/)
     .map(l => l.trim())
@@ -78956,7 +78987,6 @@ async function sendCommands(runBlock) {
         },
       }
     );
-    // Small delay to avoid flooding the API/console
     await new Promise(res => setTimeout(res, 500));
   }
   core.info("All commands sent ✅");
@@ -78966,6 +78996,10 @@ async function sendCommands(runBlock) {
   try {
     await sendPower("kill");
     await waitForStatus("offline", 30000);
+
+    if (clean) {
+      await cleanServerRoot("/");
+    }
 
     core.info(`Zipping workspace at: ${workspace}`);
     const { outPath, archiveName } = await zipWorkspace(workspace);
@@ -78991,7 +79025,7 @@ async function sendCommands(runBlock) {
       await sendCommands(runInput);
     }
 
-    core.info("Upload + extract complete ✅");
+    core.info("Deploy sequence complete ✅");
   } catch (err) {
     core.setFailed(err?.message || String(err));
   }

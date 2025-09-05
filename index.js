@@ -102,6 +102,25 @@ async function deleteServerFiles(files, root = "/") {
   );
 }
 
+async function sendPower(state) {
+  const endpoint = `${url}/api/client/servers/${serverId}/power`;
+  core.info(`Sending power action: ${state}`);
+  await axios.post(
+    endpoint,
+    { signal: state },
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+    }
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function sendCommands(runBlock) {
   const endpoint = `${url}/api/client/servers/${serverId}/command`;
   // Split by newline, trim, drop empties, and strip wrapping quotes
@@ -135,6 +154,9 @@ async function sendCommands(runBlock) {
 
 (async () => {
   try {
+    await sendPower("kill");
+    await sleep(1000);
+
     core.info(`Zipping workspace at: ${workspace}`);
     const { outPath, archiveName } = await zipWorkspace(workspace);
 
@@ -149,6 +171,9 @@ async function sendCommands(runBlock) {
 
     core.info("Cleaning up uploaded archive on the server...");
     await deleteServerFiles([archiveName], destinationDir);
+
+    await sendPower("start");
+    await sleep(1000);
 
     if (runInput && runInput.trim()) {
       core.info("Executing post-deploy commands...");

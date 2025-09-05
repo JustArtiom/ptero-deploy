@@ -78695,14 +78695,20 @@ async function zipWorkspace(rootDir) {
 
 async function getSignedUploadUrl(directory = "/") {
   const endpoint = `${url}/api/client/servers/${serverId}/files/upload`;
+  const dirParam = directory || "/";
+  core.info(`Requesting signed URL with directory in query: "${dirParam}"`);
   const { data } = await axios.get(endpoint, {
-    params: { directory },
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
     },
   });
-  return data?.attributes?.url || data?.url;
+  let signed = data?.attributes?.url || data?.url;
+  if (signed && dirParam) {
+    const joiner = signed.includes("?") ? "&" : "?";
+    signed = `${signed}${joiner}directory=${encodeURIComponent(dirParam)}`;
+  }
+  return signed;
 }
 
 async function uploadFileToSignedUrl(signedUrl, filePath, filename) {

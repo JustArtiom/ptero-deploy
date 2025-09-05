@@ -1,11 +1,11 @@
-import core from "@actions/core";
-import axios from "axios";
+const core = require("@actions/core");
+const axios = require("axios");
 
-import fs from "fs";
-import path from "path";
-import os from "os";
-import FormData from "form-data";
-import archiver from "archiver";
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const FormData = require("form-data");
+const archiver = require("archiver");
 
 function normaliseUrl(u) {
   return u.replace(/\/+$/, "");

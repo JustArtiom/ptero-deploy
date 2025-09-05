@@ -171,19 +171,13 @@ async function cleanServerRoot(root = "/") {
     return;
   }
 
-  const filesToDelete = items.filter(i => i.isFile && i.name).map(i => i.name);
-  if (filesToDelete.length) {
-    await deleteServerFiles(filesToDelete, root);
-    core.info(`Deleted ${filesToDelete.length} file(s) in ${root}`);
-  }
+  const important_files = [".env"]
 
-  const dirs = items.filter(i => i.isDir && i.name).map(i => i.name);
-  for (const dirName of dirs) {
-    const childRoot = path.posix.join(root === "/" ? "/" : root, dirName);
-    await cleanServerRoot(childRoot);
-    // delete the (now empty) directory; some panels require trailing slash to denote directories
-    await deleteServerFiles([`${dirName}/`], root);
-    core.info(`Deleted directory ${childRoot}`);
+  const toDelete = items.filter(i => i.name && !important_files.includes(i.name)).map(i => i.name);
+  
+  if (toDelete.length) {
+    await deleteServerFiles(toDelete, root);
+    core.info(`Deleted ${toDelete.length} file(s) in ${root}`);
   }
 }
 

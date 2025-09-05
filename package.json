@@ -1,0 +1,18 @@
+{
+  "name": "pterodactyl-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "npx ncc build index.js -o dist"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "axios": "^1.11.0"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.3"
+  }
+}

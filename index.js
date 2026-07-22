@@ -41,6 +41,11 @@ const serverId = core.getInput("server_id", { required: true });
 const runInput = core.getInput("run") || "";
 const cleanInput = (core.getInput("clean") || "false").toString().trim().toLowerCase();
 const clean = cleanInput === "true" || cleanInput === "1" || cleanInput === "yes";
+// Extra top-level files/folders to preserve during clean (.env is always kept).
+const cleanIgnore = (core.getInput("clean_ignore") || "")
+  .split(/[\n,]+/)
+  .map((s) => s.trim().replace(/^\.?\/+/, "").replace(/\/+$/, ""))
+  .filter(Boolean);
 const restartInput = (core.getInput("restart") || "true").toString().trim().toLowerCase();
 const shouldRestart = restartInput === "true" || restartInput === "1" || restartInput === "yes";
 
@@ -175,7 +180,11 @@ async function cleanServerRoot(root = "/") {
     return;
   }
 
-  const important_files = [".env"]
+  const important_files = [".env", ...cleanIgnore];
+
+  if (cleanIgnore.length) {
+    core.info(`Keeping (clean_ignore): ${cleanIgnore.join(", ")}`);
+  }
 
   const toDelete = items.filter(i => i.name && !important_files.includes(i.name)).map(i => i.name);
   

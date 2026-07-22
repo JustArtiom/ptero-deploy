@@ -31,6 +31,10 @@ inputs:
     description: "Whether to clean the server files before deployment (true/false)"
     required: false
     default: "false"
+  clean_ignore:
+    description: "Files/folders to keep when clean is true, in addition to .env. Newline or comma separated (e.g. 'data' or 'data,uploads')."
+    required: false
+    default: ""
   run:
     description: "Newline-separated commands to run in the server console"
     required: false
